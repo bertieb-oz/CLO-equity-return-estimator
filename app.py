@@ -899,15 +899,22 @@ with tab1:
     col4.metric("Last Flat Rock", last_fr_date.strftime("%b %Y") if last_fr_date else "N/A")
 
     # --- Trailing period returns table ---
-    st.subheader("Trailing Period Returns (annualised)")
+    if last_fr_date is not None:
+        anchor_date = last_fr_date
+        st.subheader(f"Trailing Period Returns (annualised, to {anchor_date.strftime('%b %Y')})")
+    else:
+        anchor_date = monthly["date"].max()
+        st.subheader("Trailing Period Returns (annualised)")
 
-    last_date = monthly["date"].max()
     periods = {"1Y": 12, "2Y": 24, "3Y": 36, "5Y": 60, "10Y": 120}
+
+    # Filter to data up to and including the anchor date
+    aligned = monthly.loc[monthly["date"] <= anchor_date]
 
     period_rows = []
     for label, n_months_back in periods.items():
-        cutoff = last_date - pd.DateOffset(months=n_months_back)
-        window = monthly.loc[monthly["date"] > cutoff]
+        cutoff = anchor_date - pd.DateOffset(months=n_months_back)
+        window = aligned.loc[aligned["date"] > cutoff]
         n_actual = len(window)
 
         if n_actual < 2:
