@@ -94,9 +94,19 @@ def load_excel(file_bytes: bytes) -> pd.DataFrame:
 
 
 def prepare_data(df_raw: pd.DataFrame, date_order: str) -> pd.DataFrame:
-    """Sort data oldest-first and validate."""
+    """Sort data oldest-first, forward-fill continuous inputs, and validate."""
     df = df_raw.copy()
     df = df.sort_values("date").reset_index(drop=True)
+
+    # Forward-fill continuous market data columns (NOT flat_rock_return, which is
+    # intentionally sparse — only populated at quarter-ends)
+    for col in ["sofr", "loan_spread", "loan_price"]:
+        df[col] = df[col].ffill()
+
+    # Drop any rows that still have NaN in essential columns (e.g. leading rows
+    # before first data point)
+    df = df.dropna(subset=["sofr", "loan_spread", "loan_price"]).reset_index(drop=True)
+
     return df
 
 
@@ -205,14 +215,21 @@ def run_model(df: pd.DataFrame, params: dict) -> dict:
             d.loc[qe_idx[0], "provisional_quarter_return"] = provisional
 
         # True-up factor
-        scale = (1 + fr_val) / (1 + provisional) if (1 + provisional) != 0 else 1.0
+        # For proportional method, we need scale^n * prod(1+r_i) = (1+fr_val)
+        # so scale = ((1+fr_val) / (1+provisional))^(1/n)
+        n_months_in_q = len(q_idx)
+        if true_up_method == "Proportional" and n_months_in_q > 0:
+            raw_ratio = (1 + fr_val) / (1 + provisional) if (1 + provisional) != 0 else 1.0
+            scale = raw_ratio ** (1.0 / n_months_in_q)
+        else:
+            scale = (1 + fr_val) / (1 + provisional) if (1 + provisional) != 0 else 1.0
 
         if len(qe_idx) > 0:
             d.loc[qe_idx[0], "true_up_factor"] = scale
 
         # Apply true-up to get actual-extended returns
         if true_up_method == "Proportional":
-            # Each month's gross return is scaled by the same factor
+            # Each month's gross return is scaled by the same factor (nth-root scaling)
             for idx in q_idx:
                 d.loc[idx, "actual_extended_return"] = (1 + d.loc[idx, "estimated_return"]) * scale - 1
         else:
@@ -775,7 +792,7 @@ with tab2:
     display_df = pd.DataFrame({
         "Date": monthly["date"].dt.strftime("%b-%Y"),
         "SOFR (%)": (monthly["sofr"] * 100).round(2),
-        "Loan Spread (bps)": (monthly["loan_spread"] * 10000).round(0).astype(int),
+        "Loan Spread (bps)": (monthly["loan_spread"] * 10000).round(0).astype("Int64"),
         "Loan Price Level": monthly["loan_price"].round(2),
         "Loan Price Return (%)": (monthly["loan_price_return"] * 100).round(2),
         "Carry Smoothed (% mthly)": (monthly["carry_smoothed"] * 100).round(2),
