@@ -257,6 +257,20 @@ def run_model(df: pd.DataFrame, params: dict) -> dict:
     fr_dates = d.loc[d["flat_rock_return"].notna(), "date"]
     last_fr_date = fr_dates.max() if len(fr_dates) > 0 else None
 
+    # --- Series 3: Flat Rock actual returns spread to monthly (geometric) ---
+    # For each quarter with a Flat Rock return, compute the equal monthly return
+    # such that compounding n months gives the quarterly return:
+    #   (1 + r_monthly)^n = (1 + r_quarterly)  =>  r_monthly = (1 + r_quarterly)^(1/n) - 1
+    # Months in quarters without Flat Rock data are left as NaN.
+    d["flat_rock_monthly"] = np.nan
+    for qkey, fr_val in fr_lookup.items():
+        q_mask = d["qkey"] == qkey
+        q_idx = d.index[q_mask]
+        n_m = len(q_idx)
+        if n_m > 0:
+            monthly_equiv = (1 + fr_val) ** (1.0 / n_m) - 1
+            d.loc[q_idx, "flat_rock_monthly"] = monthly_equiv
+
     # --- Build quarterly summary ---
     quarterly_rows = []
     for qkey in d["qkey"].unique():
@@ -299,6 +313,14 @@ def run_model(df: pd.DataFrame, params: dict) -> dict:
     ann_s1 = (1 + total_s1) ** (12.0 / n_months) - 1 if n_months > 0 else 0
     ann_s2 = (1 + total_s2) ** (12.0 / n_months) - 1 if n_months > 0 else 0
 
+    # Flat Rock annualised — only over months that have actual data
+    fr_valid = d["flat_rock_monthly"].dropna()
+    if len(fr_valid) > 0:
+        total_fr = np.prod(1 + fr_valid.values) - 1
+        ann_fr = (1 + total_fr) ** (12.0 / len(fr_valid)) - 1
+    else:
+        ann_fr = np.nan
+
     return {
         "monthly": d,
         "series1": d["estimated_return"],
@@ -308,6 +330,7 @@ def run_model(df: pd.DataFrame, params: dict) -> dict:
         "last_fr_date": last_fr_date,
         "annualised_s1": ann_s1,
         "annualised_s2": ann_s2,
+        "annualised_fr": ann_fr,
     }
 
 
@@ -768,6 +791,21 @@ with tab1:
             row=1, col=1,
         )
 
+    # Flat Rock actual returns (geometric monthly equivalent)
+    # Only plot where data exists (non-NaN)
+    fr_monthly_mask = monthly["flat_rock_monthly"].notna()
+    if fr_monthly_mask.any():
+        fig.add_trace(
+            go.Scatter(
+                x=monthly.loc[fr_monthly_mask, "date"],
+                y=monthly.loc[fr_monthly_mask, "flat_rock_monthly"] * 100,
+                name="Flat Rock Actual (monthly equiv.)",
+                line=dict(color="#2CA02C", width=2),
+                hovertemplate="Date: %{x|%b %Y}<br>Flat Rock: %{y:.2f}%<extra></extra>",
+            ),
+            row=1, col=1,
+        )
+
     # Vertical line at last Flat Rock date
     if last_fr_date is not None:
         fig.add_vline(
@@ -783,8 +821,19 @@ with tab1:
     # Cumulative return index
     cum_s1 = 100 * np.cumprod(1 + monthly["estimated_return"].values)
     cum_s2 = 100 * np.cumprod(1 + monthly["actual_extended_return"].values)
+
+    # Flat Rock cumulative — only over months with actual data, NaN gaps break the line
+    fr_monthly_vals = monthly["flat_rock_monthly"].values.copy()
+    cum_fr = np.full(len(fr_monthly_vals), np.nan)
+    running = 100.0
+    for i in range(len(fr_monthly_vals)):
+        if not np.isnan(fr_monthly_vals[i]):
+            running *= (1 + fr_monthly_vals[i])
+            cum_fr[i] = running
+
     monthly_cum = monthly.copy()
     monthly_cum["cum_s2"] = cum_s2
+    monthly_cum["cum_fr"] = cum_fr
 
     fig.add_trace(
         go.Scatter(
@@ -834,6 +883,21 @@ with tab1:
             row=2, col=1,
         )
 
+    # Flat Rock cumulative on bottom panel
+    fr_cum_mask = monthly_cum["cum_fr"].notna()
+    if fr_cum_mask.any():
+        fig.add_trace(
+            go.Scatter(
+                x=monthly_cum.loc[fr_cum_mask, "date"],
+                y=monthly_cum.loc[fr_cum_mask, "cum_fr"],
+                name="Flat Rock Actual Cumulative",
+                line=dict(color="#2CA02C", width=2),
+                showlegend=False,
+                hovertemplate="Date: %{x|%b %Y}<br>Flat Rock Cumulative: %{y:.1f}<extra></extra>",
+            ),
+            row=2, col=1,
+        )
+
     if last_fr_date is not None:
         fig.add_vline(
             x=last_fr_date, line_dash="dash", line_color="red", line_width=1.5,
@@ -841,7 +905,7 @@ with tab1:
         )
 
     fig.update_layout(
-        title="CLO Equity Monthly Returns — Estimated vs Actual-Extended",
+        title="CLO Equity Monthly Returns — Estimated vs Actual vs Actual-Extended",
         height=700,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         hovermode="x unified",
@@ -854,11 +918,13 @@ with tab1:
     st.plotly_chart(fig, use_container_width=True)
 
     # Summary metrics
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Annualised Return (Estimated)", f"{result['annualised_s1']*100:.2f}%")
-    col2.metric("Annualised Return (Actual-Ext)", f"{result['annualised_s2']*100:.2f}%")
-    col3.metric("Data Points", f"{len(monthly)} months")
-    col4.metric("Last Flat Rock", last_fr_date.strftime("%b %Y") if last_fr_date else "N/A")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Ann. Return (Estimated)", f"{result['annualised_s1']*100:.2f}%")
+    col2.metric("Ann. Return (Actual-Ext)", f"{result['annualised_s2']*100:.2f}%")
+    ann_fr = result["annualised_fr"]
+    col3.metric("Ann. Return (Flat Rock)", f"{ann_fr*100:.2f}%" if not np.isnan(ann_fr) else "N/A")
+    col4.metric("Data Points", f"{len(monthly)} months")
+    col5.metric("Last Flat Rock", last_fr_date.strftime("%b %Y") if last_fr_date else "N/A")
 
 # --- TAB 2: MONTHLY RETURN TABLE ---
 with tab2:
@@ -871,6 +937,9 @@ with tab2:
         "Carry Smoothed (% mthly)": (monthly["carry_smoothed"] * 100).round(2),
         "Capital Return Smoothed (% mthly)": (monthly["capital_smoothed"] * 100).round(2),
         "Estimated Return — S1 (%)": (monthly["estimated_return"] * 100).round(2),
+        "Flat Rock Monthly Equiv. (%)": monthly["flat_rock_monthly"].apply(
+            lambda x: f"{x*100:.2f}" if not pd.isna(x) else ""
+        ),
         "Actual-Extended Return — S2 (%)": (monthly["actual_extended_return"] * 100).round(2),
         "Flat Rock Qtr Return (%)": monthly["flat_rock_return"].apply(
             lambda x: f"{x*100:.2f}" if not pd.isna(x) else ""
