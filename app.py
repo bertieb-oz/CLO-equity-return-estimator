@@ -512,6 +512,16 @@ with st.sidebar:
         index=0,
     )
 
+    # Start date filter — populated after file is loaded, but declared here
+    # so it sits logically with other data parameters.  Actual filtering
+    # happens in the main panel after load_excel / prepare_data.
+    start_date_override = st.date_input(
+        "Analysis start date",
+        value=None,
+        help="Trim early data to remove noisy initialisation period. "
+             "Leave blank to use all available data.",
+    )
+
     effective_income_leverage = st.slider(
         "Effective income leverage",
         min_value=3.5, max_value=5.0, step=0.05,
@@ -653,6 +663,11 @@ except Exception as e:
     st.error(f"Error loading file: {e}")
     st.stop()
 
+# Apply start date filter if set
+if start_date_override is not None:
+    start_ts = pd.Timestamp(start_date_override)
+    df_sorted = df_sorted.loc[df_sorted["date"] >= start_ts].reset_index(drop=True)
+
 if len(df_sorted) < 6:
     st.error("Insufficient data: need at least 6 months of observations.")
     st.stop()
@@ -712,17 +727,46 @@ with tab1:
         row=1, col=1,
     )
 
-    # Series 2 - Actual-Extended
-    fig.add_trace(
-        go.Scatter(
-            x=monthly["date"],
-            y=monthly["actual_extended_return"] * 100,
-            name="Actual-Extended (Series 2)",
-            line=dict(color="#1F77B4", width=2),
-            hovertemplate="Date: %{x|%b %Y}<br>Actual-Extended: %{y:.2f}%<extra></extra>",
-        ),
-        row=1, col=1,
-    )
+    # Series 2 - Actual-Extended: split into solid (trued-up) and dashed (estimated)
+    if last_fr_date is not None:
+        # Solid segment: up to and including last Flat Rock quarter-end
+        mask_actual = monthly["date"] <= last_fr_date
+        # Dashed segment: from last Flat Rock quarter-end onward (overlap by one
+        # point so the line is continuous)
+        mask_est = monthly["date"] >= last_fr_date
+
+        fig.add_trace(
+            go.Scatter(
+                x=monthly.loc[mask_actual, "date"],
+                y=monthly.loc[mask_actual, "actual_extended_return"] * 100,
+                name="Actual (trued-up)",
+                line=dict(color="#1F77B4", width=2),
+                hovertemplate="Date: %{x|%b %Y}<br>Actual: %{y:.2f}%<extra></extra>",
+            ),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=monthly.loc[mask_est, "date"],
+                y=monthly.loc[mask_est, "actual_extended_return"] * 100,
+                name="Estimated extension",
+                line=dict(color="#1F77B4", dash="dash", width=2),
+                hovertemplate="Date: %{x|%b %Y}<br>Estimated: %{y:.2f}%<extra></extra>",
+            ),
+            row=1, col=1,
+        )
+    else:
+        # No Flat Rock data at all — everything is estimated
+        fig.add_trace(
+            go.Scatter(
+                x=monthly["date"],
+                y=monthly["actual_extended_return"] * 100,
+                name="Actual-Extended (Series 2)",
+                line=dict(color="#1F77B4", dash="dash", width=2),
+                hovertemplate="Date: %{x|%b %Y}<br>Actual-Extended: %{y:.2f}%<extra></extra>",
+            ),
+            row=1, col=1,
+        )
 
     # Vertical line at last Flat Rock date
     if last_fr_date is not None:
@@ -739,6 +783,8 @@ with tab1:
     # Cumulative return index
     cum_s1 = 100 * np.cumprod(1 + monthly["estimated_return"].values)
     cum_s2 = 100 * np.cumprod(1 + monthly["actual_extended_return"].values)
+    monthly_cum = monthly.copy()
+    monthly_cum["cum_s2"] = cum_s2
 
     fig.add_trace(
         go.Scatter(
@@ -750,16 +796,43 @@ with tab1:
         ),
         row=2, col=1,
     )
-    fig.add_trace(
-        go.Scatter(
-            x=monthly["date"], y=cum_s2,
-            name="Actual-Extended Cumulative",
-            line=dict(color="#1F77B4", width=2),
-            showlegend=False,
-            hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
-        ),
-        row=2, col=1,
-    )
+
+    if last_fr_date is not None:
+        mask_actual = monthly_cum["date"] <= last_fr_date
+        mask_est = monthly_cum["date"] >= last_fr_date
+        fig.add_trace(
+            go.Scatter(
+                x=monthly_cum.loc[mask_actual, "date"],
+                y=monthly_cum.loc[mask_actual, "cum_s2"],
+                name="Actual Cumulative",
+                line=dict(color="#1F77B4", width=2),
+                showlegend=False,
+                hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
+            ),
+            row=2, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=monthly_cum.loc[mask_est, "date"],
+                y=monthly_cum.loc[mask_est, "cum_s2"],
+                name="Estimated Extension Cumulative",
+                line=dict(color="#1F77B4", dash="dash", width=2),
+                showlegend=False,
+                hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
+            ),
+            row=2, col=1,
+        )
+    else:
+        fig.add_trace(
+            go.Scatter(
+                x=monthly["date"], y=cum_s2,
+                name="Actual-Extended Cumulative",
+                line=dict(color="#1F77B4", dash="dash", width=2),
+                showlegend=False,
+                hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
+            ),
+            row=2, col=1,
+        )
 
     if last_fr_date is not None:
         fig.add_vline(
