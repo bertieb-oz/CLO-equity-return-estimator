@@ -738,61 +738,48 @@ with tab1:
         row_heights=[0.55, 0.45],
     )
 
-    # Series 1 - Estimated
-    fig.add_trace(
-        go.Scatter(
-            x=monthly["date"],
-            y=monthly["estimated_return"] * 100,
-            name="Estimated (Series 1)",
-            line=dict(color="grey", dash="dash", width=1.5),
-            hovertemplate="Date: %{x|%b %Y}<br>Estimated: %{y:.2f}%<extra></extra>",
-        ),
-        row=1, col=1,
-    )
+    # --- TOP PANEL: Monthly returns ---
 
-    # Series 2 - Actual-Extended: split into solid (trued-up) and dashed (estimated)
+    # Model estimate — solid grey up to last Flat Rock date
     if last_fr_date is not None:
-        # Solid segment: up to and including last Flat Rock quarter-end
-        mask_actual = monthly["date"] <= last_fr_date
-        # Dashed segment: from last Flat Rock quarter-end onward (overlap by one
-        # point so the line is continuous)
-        mask_est = monthly["date"] >= last_fr_date
+        mask_model = monthly["date"] <= last_fr_date
+        mask_ext = monthly["date"] >= last_fr_date
 
         fig.add_trace(
             go.Scatter(
-                x=monthly.loc[mask_actual, "date"],
-                y=monthly.loc[mask_actual, "actual_extended_return"] * 100,
-                name="Actual (trued-up)",
-                line=dict(color="#1F77B4", width=2),
-                hovertemplate="Date: %{x|%b %Y}<br>Actual: %{y:.2f}%<extra></extra>",
+                x=monthly.loc[mask_model, "date"],
+                y=monthly.loc[mask_model, "estimated_return"] * 100,
+                name="Model Estimate",
+                line=dict(color="grey", width=1.5),
+                hovertemplate="Date: %{x|%b %Y}<br>Model: %{y:.2f}%<extra></extra>",
             ),
             row=1, col=1,
         )
+        # Estimated extension — dashed grey beyond last Flat Rock
         fig.add_trace(
             go.Scatter(
-                x=monthly.loc[mask_est, "date"],
-                y=monthly.loc[mask_est, "actual_extended_return"] * 100,
-                name="Estimated extension",
-                line=dict(color="#1F77B4", dash="dash", width=2),
-                hovertemplate="Date: %{x|%b %Y}<br>Estimated: %{y:.2f}%<extra></extra>",
+                x=monthly.loc[mask_ext, "date"],
+                y=monthly.loc[mask_ext, "estimated_return"] * 100,
+                name="Estimated Extension",
+                line=dict(color="grey", dash="dot", width=1.5),
+                hovertemplate="Date: %{x|%b %Y}<br>Est. Extension: %{y:.2f}%<extra></extra>",
             ),
             row=1, col=1,
         )
     else:
-        # No Flat Rock data at all — everything is estimated
+        # No Flat Rock data — entire series is estimated
         fig.add_trace(
             go.Scatter(
                 x=monthly["date"],
-                y=monthly["actual_extended_return"] * 100,
-                name="Actual-Extended (Series 2)",
-                line=dict(color="#1F77B4", dash="dash", width=2),
-                hovertemplate="Date: %{x|%b %Y}<br>Actual-Extended: %{y:.2f}%<extra></extra>",
+                y=monthly["estimated_return"] * 100,
+                name="Model Estimate",
+                line=dict(color="grey", dash="dot", width=1.5),
+                hovertemplate="Date: %{x|%b %Y}<br>Model: %{y:.2f}%<extra></extra>",
             ),
             row=1, col=1,
         )
 
     # Flat Rock actual returns (geometric monthly equivalent)
-    # Only plot where data exists (non-NaN)
     fr_monthly_mask = monthly["flat_rock_monthly"].notna()
     if fr_monthly_mask.any():
         fig.add_trace(
@@ -814,15 +801,15 @@ with tab1:
         )
         fig.add_annotation(
             x=last_fr_date, y=1.0, yref="paper",
-            text="Last Flat Rock release →<br>Estimated extension",
+            text="Last Flat Rock →",
             showarrow=False, xanchor="right", font=dict(size=10, color="red"),
         )
 
-    # Cumulative return index
-    cum_s1 = 100 * np.cumprod(1 + monthly["estimated_return"].values)
-    cum_s2 = 100 * np.cumprod(1 + monthly["actual_extended_return"].values)
+    # --- BOTTOM PANEL: Cumulative return index ---
 
-    # Flat Rock cumulative — only over months with actual data, NaN gaps break the line
+    cum_est = 100 * np.cumprod(1 + monthly["estimated_return"].values)
+
+    # Flat Rock cumulative — compound only over months with actual data
     fr_monthly_vals = monthly["flat_rock_monthly"].values.copy()
     cum_fr = np.full(len(fr_monthly_vals), np.nan)
     running = 100.0
@@ -831,69 +818,55 @@ with tab1:
             running *= (1 + fr_monthly_vals[i])
             cum_fr[i] = running
 
-    monthly_cum = monthly.copy()
-    monthly_cum["cum_s2"] = cum_s2
-    monthly_cum["cum_fr"] = cum_fr
-
-    fig.add_trace(
-        go.Scatter(
-            x=monthly["date"], y=cum_s1,
-            name="Estimated Cumulative",
-            line=dict(color="grey", dash="dash", width=1.5),
-            showlegend=False,
-            hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
-        ),
-        row=2, col=1,
-    )
-
     if last_fr_date is not None:
-        mask_actual = monthly_cum["date"] <= last_fr_date
-        mask_est = monthly_cum["date"] >= last_fr_date
+        mask_model = monthly["date"] <= last_fr_date
+        mask_ext = monthly["date"] >= last_fr_date
+
         fig.add_trace(
             go.Scatter(
-                x=monthly_cum.loc[mask_actual, "date"],
-                y=monthly_cum.loc[mask_actual, "cum_s2"],
-                name="Actual Cumulative",
-                line=dict(color="#1F77B4", width=2),
+                x=monthly.loc[mask_model, "date"],
+                y=cum_est[mask_model],
+                name="Model Cumulative",
+                line=dict(color="grey", width=1.5),
                 showlegend=False,
-                hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
+                hovertemplate="Date: %{x|%b %Y}<br>Model Cum.: %{y:.1f}<extra></extra>",
             ),
             row=2, col=1,
         )
         fig.add_trace(
             go.Scatter(
-                x=monthly_cum.loc[mask_est, "date"],
-                y=monthly_cum.loc[mask_est, "cum_s2"],
-                name="Estimated Extension Cumulative",
-                line=dict(color="#1F77B4", dash="dash", width=2),
+                x=monthly.loc[mask_ext, "date"],
+                y=cum_est[mask_ext],
+                name="Est. Extension Cumulative",
+                line=dict(color="grey", dash="dot", width=1.5),
                 showlegend=False,
-                hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
+                hovertemplate="Date: %{x|%b %Y}<br>Est. Extension Cum.: %{y:.1f}<extra></extra>",
             ),
             row=2, col=1,
         )
     else:
         fig.add_trace(
             go.Scatter(
-                x=monthly["date"], y=cum_s2,
-                name="Actual-Extended Cumulative",
-                line=dict(color="#1F77B4", dash="dash", width=2),
+                x=monthly["date"], y=cum_est,
+                name="Model Cumulative",
+                line=dict(color="grey", dash="dot", width=1.5),
                 showlegend=False,
-                hovertemplate="Date: %{x|%b %Y}<br>Cumulative: %{y:.1f}<extra></extra>",
+                hovertemplate="Date: %{x|%b %Y}<br>Model Cum.: %{y:.1f}<extra></extra>",
             ),
             row=2, col=1,
         )
 
-    # Flat Rock cumulative on bottom panel
-    fr_cum_mask = monthly_cum["cum_fr"].notna()
+    # Flat Rock cumulative
+    fr_cum_mask = pd.Series(cum_fr).notna().values
     if fr_cum_mask.any():
         fig.add_trace(
             go.Scatter(
-                x=monthly_cum.loc[fr_cum_mask, "date"],
-                y=monthly_cum.loc[fr_cum_mask, "cum_fr"],
-                name="Flat Rock Actual Cumulative",
+                x=monthly.loc[fr_cum_mask, "date"],
+                y=cum_fr[fr_cum_mask],
+                name="Flat Rock Cumulative",
                 line=dict(color="#2CA02C", width=2),
                 showlegend=False,
-                hovertemplate="Date: %{x|%b %Y}<br>Flat Rock Cumulative: %{y:.1f}<extra></extra>",
+                hovertemplate="Date: %{x|%b %Y}<br>Flat Rock Cum.: %{y:.1f}<extra></extra>",
             ),
             row=2, col=1,
         )
@@ -905,7 +878,7 @@ with tab1:
         )
 
     fig.update_layout(
-        title="CLO Equity Monthly Returns — Estimated vs Actual vs Actual-Extended",
+        title="CLO Equity Monthly Returns — Model Estimate vs Flat Rock Actual",
         height=700,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         hovermode="x unified",
@@ -918,13 +891,12 @@ with tab1:
     st.plotly_chart(fig, use_container_width=True)
 
     # Summary metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Ann. Return (Estimated)", f"{result['annualised_s1']*100:.2f}%")
-    col2.metric("Ann. Return (Actual-Ext)", f"{result['annualised_s2']*100:.2f}%")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Ann. Return (Model Estimate)", f"{result['annualised_s1']*100:.2f}%")
     ann_fr = result["annualised_fr"]
-    col3.metric("Ann. Return (Flat Rock)", f"{ann_fr*100:.2f}%" if not np.isnan(ann_fr) else "N/A")
-    col4.metric("Data Points", f"{len(monthly)} months")
-    col5.metric("Last Flat Rock", last_fr_date.strftime("%b %Y") if last_fr_date else "N/A")
+    col2.metric("Ann. Return (Flat Rock)", f"{ann_fr*100:.2f}%" if not np.isnan(ann_fr) else "N/A")
+    col3.metric("Data Points", f"{len(monthly)} months")
+    col4.metric("Last Flat Rock", last_fr_date.strftime("%b %Y") if last_fr_date else "N/A")
 
 # --- TAB 2: MONTHLY RETURN TABLE ---
 with tab2:
@@ -936,16 +908,12 @@ with tab2:
         "Loan Price Return (%)": (monthly["loan_price_return"] * 100).round(2),
         "Carry Smoothed (% mthly)": (monthly["carry_smoothed"] * 100).round(2),
         "Capital Return Smoothed (% mthly)": (monthly["capital_smoothed"] * 100).round(2),
-        "Estimated Return — S1 (%)": (monthly["estimated_return"] * 100).round(2),
+        "Estimated Return (%)": (monthly["estimated_return"] * 100).round(2),
         "Flat Rock Monthly Equiv. (%)": monthly["flat_rock_monthly"].apply(
             lambda x: f"{x*100:.2f}" if not pd.isna(x) else ""
         ),
-        "Actual-Extended Return — S2 (%)": (monthly["actual_extended_return"] * 100).round(2),
         "Flat Rock Qtr Return (%)": monthly["flat_rock_return"].apply(
             lambda x: f"{x*100:.2f}" if not pd.isna(x) else ""
-        ),
-        "True-up Factor": monthly["true_up_factor"].apply(
-            lambda x: f"{x:.6f}" if not pd.isna(x) else ""
         ),
     })
 
@@ -968,10 +936,15 @@ with tab3:
 
     # Format numeric columns
     for col in ["Flat Rock Return (%)", "Estimated Quarterly Return (%)",
-                "Actual-Extended Quarterly Return (%)", "Estimation Error (%)"]:
-        q_display[col] = q_display[col].apply(
-            lambda x: f"{x:.2f}" if not pd.isna(x) else ""
-        )
+                "Estimation Error (%)"]:
+        if col in q_display.columns:
+            q_display[col] = q_display[col].apply(
+                lambda x: f"{x:.2f}" if not pd.isna(x) else ""
+            )
+
+    # Drop Actual-Extended column if present
+    if "Actual-Extended Quarterly Return (%)" in q_display.columns:
+        q_display = q_display.drop(columns=["Actual-Extended Quarterly Return (%)"])
 
     # Reverse order for newest-first display
     q_display = q_display.iloc[::-1].reset_index(drop=True)
@@ -979,9 +952,11 @@ with tab3:
     st.dataframe(q_display, use_container_width=True, height=400)
 
     # Annualised summary row
+    ann_fr = result["annualised_fr"]
+    ann_fr_str = f"{ann_fr*100:.2f}%" if not np.isnan(ann_fr) else "N/A"
     st.markdown(
-        f"**Annualised Returns** — Estimated: **{result['annualised_s1']*100:.2f}%** | "
-        f"Actual-Extended: **{result['annualised_s2']*100:.2f}%** | "
+        f"**Annualised Returns** — Model Estimate: **{result['annualised_s1']*100:.2f}%** | "
+        f"Flat Rock Actual: **{ann_fr_str}** | "
         f"Period: {monthly['date'].min().strftime('%b %Y')} – {monthly['date'].max().strftime('%b %Y')} "
         f"({len(monthly)} months)"
     )
