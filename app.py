@@ -535,15 +535,16 @@ with st.sidebar:
         index=0,
     )
 
-    # Start date filter — populated after file is loaded, but declared here
-    # so it sits logically with other data parameters.  Actual filtering
-    # happens in the main panel after load_excel / prepare_data.
-    start_date_override = st.date_input(
-        "Analysis start date",
-        value=None,
-        help="Trim early data to remove noisy initialisation period. "
-             "Leave blank to use all available data.",
-    )
+    # Start date filter
+    use_start_filter = st.checkbox("Override analysis start date", value=False)
+    if use_start_filter:
+        start_date_override = st.date_input(
+            "Analysis start date",
+            value=datetime.date(2021, 1, 1),
+            help="Trim early data to remove noisy initialisation period.",
+        )
+    else:
+        start_date_override = None
 
     effective_income_leverage = st.slider(
         "Effective income leverage",
