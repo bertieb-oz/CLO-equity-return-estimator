@@ -898,6 +898,52 @@ with tab1:
     col3.metric("Data Points", f"{len(monthly)} months")
     col4.metric("Last Flat Rock", last_fr_date.strftime("%b %Y") if last_fr_date else "N/A")
 
+    # --- Trailing period returns table ---
+    st.subheader("Trailing Period Returns (annualised)")
+
+    last_date = monthly["date"].max()
+    periods = {"1Y": 12, "2Y": 24, "3Y": 36, "5Y": 60, "10Y": 120}
+
+    period_rows = []
+    for label, n_months_back in periods.items():
+        cutoff = last_date - pd.DateOffset(months=n_months_back)
+        window = monthly.loc[monthly["date"] > cutoff]
+        n_actual = len(window)
+
+        if n_actual < 2:
+            period_rows.append({
+                "Period": label,
+                "Model Estimate (ann.)": "—",
+                "Flat Rock Actual (ann.)": "—",
+                "Difference": "—",
+            })
+            continue
+
+        # Model: compound monthly estimated returns then annualise
+        total_model = np.prod(1 + window["estimated_return"].values) - 1
+        ann_model = (1 + total_model) ** (12.0 / n_actual) - 1
+
+        # Flat Rock: compound only non-NaN monthly equivalents
+        fr_vals = window["flat_rock_monthly"].dropna()
+        if len(fr_vals) > 0:
+            total_fr = np.prod(1 + fr_vals.values) - 1
+            ann_fr_period = (1 + total_fr) ** (12.0 / len(fr_vals)) - 1
+            fr_str = f"{ann_fr_period * 100:.2f}%"
+            diff_str = f"{(ann_model - ann_fr_period) * 100:+.2f}%"
+        else:
+            fr_str = "—"
+            diff_str = "—"
+
+        period_rows.append({
+            "Period": label,
+            "Model Estimate (ann.)": f"{ann_model * 100:.2f}%",
+            "Flat Rock Actual (ann.)": fr_str,
+            "Difference": diff_str,
+        })
+
+    period_df = pd.DataFrame(period_rows)
+    st.dataframe(period_df, use_container_width=False, hide_index=True)
+
 # --- TAB 2: MONTHLY RETURN TABLE ---
 with tab2:
     display_df = pd.DataFrame({
